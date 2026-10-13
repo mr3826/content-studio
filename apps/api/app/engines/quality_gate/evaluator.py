@@ -261,38 +261,23 @@ class QualityGateEvaluator:
         packet: Optional[Any] = None,
     ) -> tuple[QualityDimension, List[CorrectionRoute]]:
         if not niche:
-            from app.core.config import settings
-            if getattr(settings, "AI_MOCK_MODE", False):
-                # Preserve isolated sample configuration for offline tests (Improvement G)
-                niche = {
-                    "name": "Local AI Systems Studio",
-                    "allowed_topics": ["coding agents", "local llms", "developer automation", "systems", "benchmark"],
-                    "adjacent_topics": ["devops", "workflow builds", "media", "core systems", "quality gate"],
-                    "content_pillars": [
-                        {"id": "p1", "name": "Core Systems", "keywords": ["systems", "quality gate", "benchmark"]},
-                        {"id": "p2", "name": "Coding Agents", "keywords": ["coding", "agents", "local"]},
-                        {"id": "p3", "name": "Workflow Builds", "keywords": ["workflow", "builds", "automation"]},
-                        {"id": "p4", "name": "Media", "keywords": ["media", "render", "video"]},
-                    ],
-                }
-            else:
-                return QualityDimension(
-                    id="niche_fit",
-                    name="Single Niche Alignment",
-                    score=0.0,
-                    status=DimensionStatus.BLOCKED,
-                    summary="Active niche profile is unconfigured. Quality Gate requires a valid active niche.",
-                    metrics={"niche_name": None, "verdict_id": None},
-                    details=["NicheProfile 'primary' is missing in studio database."],
-                ), [
-                    CorrectionRoute(
-                        action_type="return_to_script",
-                        title="Configure Studio Niche",
-                        description="Configure your active single-niche profile in Studio Settings.",
-                        target_route="/settings",
-                        severity="high",
-                    )
-                ]
+            return QualityDimension(
+                id="niche_fit",
+                name="Single Niche Alignment",
+                score=0.0,
+                status=DimensionStatus.BLOCKED,
+                summary="Active niche profile is unconfigured. Quality Gate requires a valid active niche.",
+                metrics={"niche_name": None, "verdict_id": None, "classification": "missing_profile", "requires_review": True},
+                details=["NicheProfile 'primary' is missing in studio database."],
+            ), [
+                CorrectionRoute(
+                    action_type="return_to_script",
+                    title="Configure Studio Niche",
+                    description="Configure your active single-niche profile in Studio Settings.",
+                    target_route="/settings",
+                    severity="high",
+                )
+            ]
 
         # Extract attributes from niche (handles both Pydantic/SQLAlchemy model or dict)
         if isinstance(niche, dict):
@@ -340,13 +325,30 @@ class QualityGateEvaluator:
             if cm not in allowed:
                 allowed.append(cm)
 
-        # Fallback for simple mock objects in legacy unit tests with only name
-        if not allowed and not pillars and name_val:
-            allowed = [name_val.lower()] + [w.lower() for w in name_val.split() if len(w) > 3]
-            item_title = getattr(item, "title", None) or getattr(item, "working_title", "")
-            if item_title:
-                allowed.extend([w.lower() for w in item_title.split() if len(w) > 3])
-            pillars = [{"id": "p1", "name": name_val, "keywords": allowed}]
+        # Empty allowed topics and pillars is an unconfigured policy: strictly non-passing
+        if not allowed and not pillars:
+            return QualityDimension(
+                id="niche_fit",
+                name="Single Niche Alignment",
+                score=0.0,
+                status=DimensionStatus.BLOCKED,
+                summary="Active niche profile has no defined allowed topics or content pillars.",
+                metrics={
+                    "niche_name": name_val,
+                    "verdict_id": None,
+                    "classification": "unconfigured_policy",
+                    "requires_review": True,
+                },
+                details=["The active niche profile has empty allowed topics and empty content pillars. Configure pillars in Settings."],
+            ), [
+                CorrectionRoute(
+                    action_type="return_to_script",
+                    title="Define Content Pillars",
+                    description="Configure content pillars and allowed topics in Studio Settings to evaluate niche alignment.",
+                    target_route="/settings",
+                    severity="high",
+                )
+            ]
 
         niche_dict = {
             "name": name_val,
@@ -473,6 +475,7 @@ class QualityGateEvaluator:
             "requires_review": verdict.requires_review,
             "pillar_matches": verdict.pillar_matches,
             "policy_version": verdict.policy_version,
+            "policy_fingerprint": verdict.policy_fingerprint or fingerprint_val,
             "audience_value": verdict.audience_value_breakdown,
         }
 

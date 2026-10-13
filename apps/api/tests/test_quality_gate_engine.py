@@ -52,9 +52,17 @@ def test_quality_gate_evaluator_all_nine_dimensions():
     brand = SimpleNamespace(
         banned_cliches=["game-changer", "revolutionary", "dive into"],
     )
-    niche = SimpleNamespace(
-        name="Developer Productivity",
-    )
+    niche = {
+        "name": "Developer Productivity",
+        "allowed_topics": ["high-performance async workflows", "python benchmark", "database pipelines"],
+        "content_pillars": [
+            {
+                "id": "p1",
+                "name": "Async Workflows",
+                "keywords": ["async", "workflows", "python", "benchmark", "database pipelines"],
+            }
+        ],
+    }
     scene = SimpleNamespace(
         id="sc1",
         rights_status="CLEARED",
@@ -115,6 +123,11 @@ def test_quality_gate_evaluator_blocks_on_banned_cliches():
     section = SimpleNamespace(narration="This is a revolutionary game-changer for content creators.")
     script = SimpleNamespace(id="script-test-2", total_word_count=50, sections=[section])
     brand = SimpleNamespace(banned_cliches=["game-changer", "revolutionary"])
+    valid_niche = {
+        "name": "Creator Tools",
+        "allowed_topics": ["content creators", "test", "tools"],
+        "content_pillars": [{"id": "p1", "name": "Tools", "keywords": ["creators", "test", "tools"]}],
+    }
 
     result = evaluator.evaluate_all(
         item=item,
@@ -123,7 +136,7 @@ def test_quality_gate_evaluator_blocks_on_banned_cliches():
         packet=None,
         originality_plan=None,
         brand=brand,
-        niche=None,
+        niche=valid_niche,
         scenes=[],
         media_package=None,
     )
@@ -140,6 +153,11 @@ def test_quality_gate_evaluator_blocks_on_restricted_rights():
     item = SimpleNamespace(id="item-test-3", original_value_connection="Test", hook_type="curiosity_gap", incremental_cost=0.0, manual_time_minutes=0)
     script = SimpleNamespace(id="script-test-3", total_word_count=50, sections=[SimpleNamespace(narration="Clean audio.")])
     scenes = [SimpleNamespace(id="sc-blocked", rights_status="BLOCKED")]
+    valid_niche = {
+        "name": "Audio Production",
+        "allowed_topics": ["clean audio", "test", "audio"],
+        "content_pillars": [{"id": "p1", "name": "Audio", "keywords": ["audio", "production"]}],
+    }
 
     result = evaluator.evaluate_all(
         item=item,
@@ -148,7 +166,7 @@ def test_quality_gate_evaluator_blocks_on_restricted_rights():
         packet=None,
         originality_plan=None,
         brand=SimpleNamespace(banned_cliches=[]),
-        niche=None,
+        niche=valid_niche,
         scenes=scenes,
         media_package=None,
     )
@@ -157,6 +175,51 @@ def test_quality_gate_evaluator_blocks_on_restricted_rights():
     rights_dim = next(d for d in result["dimensions"] if d.id == "asset_rights")
     assert rights_dim.status == DimensionStatus.BLOCKED
     assert any(r.action_type == "replace_asset" for r in result["recommendations"])
+
+
+def test_quality_gate_evaluator_missing_niche_blocks_regardless_of_mock_mode(monkeypatch):
+    """Critical Fix A: Verify missing niche ALWAYS blocks in Quality Gate under both AI_MOCK_MODE=True and False."""
+    from app.core.config import settings
+
+    evaluator = QualityGateEvaluator()
+    item = SimpleNamespace(id="item-test-no-niche", title="Coding Agents Benchmark", working_title="Coding Agents Benchmark")
+
+    for mock_val in [True, False]:
+        monkeypatch.setattr(settings, "AI_MOCK_MODE", mock_val)
+        dim, routes = evaluator._eval_niche(niche=None, item=item, script=None)
+
+        assert dim.status == DimensionStatus.BLOCKED
+        assert dim.score == 0.0
+        assert "unconfigured" in dim.summary.lower()
+        assert dim.metrics["classification"] == "missing_profile"
+        assert any(r.target_route == "/settings" for r in routes)
+
+
+def test_quality_gate_evaluator_eliminates_self_validating_niche_rules():
+    """Critical Fix B: Verify empty allowed topics/pillars cannot self-validate from item title."""
+    evaluator = QualityGateEvaluator()
+
+    # Niche with name only, NO allowed topics and NO pillars
+    empty_policy_niche = {
+        "name": "Empty Studio",
+        "allowed_topics": [],
+        "content_pillars": [],
+    }
+
+    item = SimpleNamespace(
+        id="item-test-self-val",
+        title="Empty Studio Amazing Video",
+        working_title="Empty Studio Amazing Video",
+    )
+
+    dim, routes = evaluator._eval_niche(niche=empty_policy_niche, item=item, script=None)
+
+    # Must be BLOCKED, score 0.0, classification unconfigured_policy
+    assert dim.status == DimensionStatus.BLOCKED
+    assert dim.score == 0.0
+    assert dim.metrics["classification"] == "unconfigured_policy"
+    assert "no defined allowed topics or content pillars" in dim.summary.lower()
+    assert any(r.action_type == "return_to_script" for r in routes)
 
 
 @pytest.mark.asyncio

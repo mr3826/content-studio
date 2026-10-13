@@ -46,6 +46,7 @@ def calculate_opportunity_score(
 
     # 1. Niche Fit (authoritative Niche Guard evaluation, max 18)
     niche_fit = 10.0  # default baseline for offline/test context
+    verdict = None
     if niche:
         from app.engines.niche_guard.contracts import NicheGuardInput
         from app.engines.niche_guard.engine import NicheGuardEngine
@@ -238,24 +239,64 @@ def calculate_opportunity_score(
     if not risks:
         risks.append("Standard verification needed: confirm claims against official documentation before script approval.")
 
-    # Recommended Action & Why
-    if final_score >= 70.0:
-        recommended_action = "Research"
-        why = (
-            f"Strong niche fit ({niche_fit:.1f}/18) with exceptional original test potential ({original_value:.1f}/20). "
-            f"Directly addresses audience problem areas with {content_family} potential."
-        )
-    elif final_score >= 45.0:
-        recommended_action = "Watch"
-        why = (
-            f"Moderate opportunity score ({final_score:.1f}/100). High niche relevance but requires stronger trend momentum "
-            f"or further empirical confirmation before committing production resources."
-        )
+    # Check Niche Guard review propagation
+    if verdict:
+        if verdict.is_blocked or verdict.classification == "off_niche":
+            recommended_action = "Reject"
+            why = f"Rejected by Niche Guard ({verdict.classification}): {verdict.reason}"
+            risks.append(f"Niche Block: {verdict.reason}")
+        elif verdict.requires_review or verdict.classification in ("ambiguous", "adjacent"):
+            risks.append(f"Niche Review Required: {'; '.join(verdict.review_reasons or [verdict.reason])}")
+            if final_score >= 70.0:
+                recommended_action = "Review Niche Alignment"
+                why = (
+                    f"Strong potential ({final_score:.1f}/100) but topic is {verdict.classification}. "
+                    f"Requires creator editorial review before proceeding to research: {verdict.reason}"
+                )
+            elif final_score >= 45.0:
+                recommended_action = "Watch"
+                why = f"Moderate score ({final_score:.1f}/100) requiring creator niche review: {verdict.reason}"
+            else:
+                recommended_action = "Reject"
+                why = f"Sub-threshold score ({final_score:.1f}/100) with unverified niche alignment: {verdict.reason}"
+        else:
+            # Standard core niche pass
+            if final_score >= 70.0:
+                recommended_action = "Research"
+                why = (
+                    f"Strong niche fit ({niche_fit:.1f}/18) with exceptional original test potential ({original_value:.1f}/20). "
+                    f"Directly addresses audience problem areas with {content_family} potential."
+                )
+            elif final_score >= 45.0:
+                recommended_action = "Watch"
+                why = (
+                    f"Moderate opportunity score ({final_score:.1f}/100). High niche relevance but requires stronger trend momentum "
+                    f"or further empirical confirmation before committing production resources."
+                )
+            else:
+                recommended_action = "Reject"
+                why = (
+                    f"Sub-threshold score ({final_score:.1f}/100) due to low original test potential or high channel saturation penalty."
+                )
     else:
-        recommended_action = "Reject"
-        why = (
-            f"Sub-threshold score ({final_score:.1f}/100) due to low original test potential or high channel saturation penalty."
-        )
+        # Fallback when evaluated without active niche fixture
+        if final_score >= 70.0:
+            recommended_action = "Research"
+            why = (
+                f"Strong niche fit ({niche_fit:.1f}/18) with exceptional original test potential ({original_value:.1f}/20). "
+                f"Directly addresses audience problem areas with {content_family} potential."
+            )
+        elif final_score >= 45.0:
+            recommended_action = "Watch"
+            why = (
+                f"Moderate opportunity score ({final_score:.1f}/100). High niche relevance but requires stronger trend momentum "
+                f"or further empirical confirmation before committing production resources."
+            )
+        else:
+            recommended_action = "Reject"
+            why = (
+                f"Sub-threshold score ({final_score:.1f}/100) due to low original test potential or high channel saturation penalty."
+            )
 
     meta = {
         "production_effort": production_effort,
@@ -266,6 +307,7 @@ def calculate_opportunity_score(
         "risks": risks,
         "why": why,
         "recommended_action": recommended_action,
+        "niche_verdict": verdict.model_dump(mode="json") if verdict else None,
     }
 
     return breakdown, meta

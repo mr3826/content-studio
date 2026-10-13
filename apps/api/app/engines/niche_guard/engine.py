@@ -414,8 +414,8 @@ class NicheGuardEngine(BaseEngine):
                     "evidence_potential": 0.0,
                 },
                 platform_warning_metadata={
-                    "blocked_policy_alert": f"Blocked topic violation: {', '.join(hard_blocked_detected)}",
-                    "action_required": "Editorial rejection: off-limits commercial, financial, or unverified claims.",
+                    "editorial_rejection": f"Topic blocked by creator editorial policy: {', '.join(hard_blocked_detected)}",
+                    "disclaimer": "Advisory notice: This rejection reflects the creator's defined niche boundaries, not an external platform policy or copyright violation.",
                 },
             )
             self._execution_history[verdict.id] = verdict
@@ -674,13 +674,10 @@ class NicheGuardEngine(BaseEngine):
         domain_vocab = {
             w.lower() for w in re.findall(r"\b\w+\b", niche_vocab_text) if len(w) > 2 and w.lower() not in stopwords
         }
-        # Add technical domain abbreviations and multilingual tokens
-        domain_vocab.update({
-            "ai", "llm", "llms", "rag", "ast", "pr", "git", "repo", "eval", "evals",
-            "swe", "claude", "qwen", "cursor", "windsurf", "deepseek", "docker", "repl",
-            "qlora", "sql", "coder", "coders", "neovim", "ollama", "vllm", "কোডিং",
-            "এজেন্ট", "বেঞ্চমার্ক", "মডেল", "রিভিউ", "টুল", "টুলস"
-        })
+        # Expand domain vocabulary with variations/aliases for words in the active profile
+        for w in list(domain_vocab):
+            for var in self._get_term_variations(w):
+                domain_vocab.add(var.lower())
 
         # 9. Quality Defect Detection: Tag Stuffing, Keyword Stuffing, Title/Body Mismatch
         title_body_corpus = self._normalize_text(f"{item.title} {item.text}")
@@ -785,31 +782,32 @@ class NicheGuardEngine(BaseEngine):
             passed = True
 
         # Audience Value Dimensions Assessment (0.0 to 100.0)
+        # Evaluates preliminary indicative screening heuristics based on lexical alignment.
+        # Factual and evidence verification is conducted by Research and Originality engines.
         target_audience_desc = niche.get("audience") or ""
         audience_words = [w.lower() for w in re.findall(r"\b\w+\b", target_audience_desc) if len(w) > 4]
         matched_aud_words = [w for w in audience_words if w in corpus]
 
-        # 1. Topic Relevance
+        # 1. Topic Relevance: density of active pillars and allowed topics
         topic_relevance = min(100.0, round((len(matched_pillars) * 35.0) + (len(matched_allowed) * 25.0) + (len(matched_adjacent) * 15.0), 1))
 
-        # 2. Audience Fit
+        # 2. Audience Fit: proportional to persona keywords and skill level matches (no artificial 50% baseline)
         aud_skill_levels = niche.get("target_skill_levels") or []
         skill_matches = sum(1 for sl in aud_skill_levels if any(w in corpus for w in sl.lower().split() if len(w) > 4))
-        base_aud = 50.0 if passed else 20.0
-        audience_fit = min(100.0, round(base_aud + (len(matched_aud_words) * 15.0) + (skill_matches * 15.0), 1))
+        audience_fit = min(100.0, round((len(matched_aud_words) * 35.0) + (skill_matches * 30.0), 1))
 
-        # 3. Problem Relevance
-        problem_relevance = min(100.0, round(len(matched_problems) * 30.0, 1))
+        # 3. Problem Relevance: matched problem keywords
+        problem_relevance = min(100.0, round(len(matched_problems) * 35.0, 1))
 
-        # 4. Practical Value
+        # 4. Practical Value: detected actionable technical or workflow terms
         practical_signals = {"recipe", "workflow", "tutorial", "code", "setup", "guide", "benchmark", "teardown", "tools", "script", "config"}
         practical_matches = sum(1 for ps in practical_signals if ps in corpus)
-        practical_value = min(100.0, round(30.0 + (practical_matches * 15.0), 1))
+        practical_value = min(100.0, round(practical_matches * 30.0, 1))
 
-        # 5. Evidence Potential
+        # 5. Evidence Potential: detected verifiable citations, artifacts, and must-have signals
         evidence_signals = {"benchmark", "data", "paper", "github", "repo", "test", "experiment", "latency", "measurement"}
         evidence_matches = sum(1 for es in evidence_signals if es in corpus)
-        evidence_potential = min(100.0, round(20.0 + (evidence_matches * 15.0) + (len(matched_must_haves) * 20.0), 1))
+        evidence_potential = min(100.0, round((evidence_matches * 25.0) + (len(matched_must_haves) * 30.0), 1))
 
         audience_value_breakdown = {
             "topic_relevance": topic_relevance,
@@ -827,18 +825,26 @@ class NicheGuardEngine(BaseEngine):
         factors.append(NicheGuardFactor(
             criterion="audience_relevance",
             points=round(aud_rel_score * 0.1, 1),
-            detail=f"Audience relevance evaluated at {aud_rel_score}% based on persona target keywords, problems, and practical value.",
+            detail=f"Preliminary indicative screening heuristic: {aud_rel_score}/100 based on lexical persona and problem term matches. Factual verification is conducted in Research/Originality engines.",
             matched_items=matched_aud_words,
         ))
 
-        # Platform Advisory Guidance
-        platform_advisories: Dict[str, Any] = {}
+        # Platform Advisory Guidance (non-binding publishing advisories, not platform compliance guarantees)
+        platform_advisories: Dict[str, Any] = {
+            "disclaimer": "Advisory publishing notice only. Niche Guard does not evaluate or guarantee platform monetization, copyright clearance, or community guidelines compliance.",
+        }
         if any(w in corpus for w in ["ai generated", "synthetic", "cloned voice", "deepfake"]):
-            platform_advisories["synthetic_disclosure"] = "YouTube/Meta/TikTok guidance: Verify synthetic content labels if using realistic generated scenes."
-        if any(w in corpus for w in ["sponsor", "affiliate", "partner", "discount"]):
-            platform_advisories["commercial_disclosure"] = "Ensure proper commercial and sponsorship disclosures on publishing platform."
+            platform_advisories["synthetic_media_notice"] = (
+                "Advisory notice (YouTube/Meta/TikTok): If publishing realistic synthetic or AI-generated media, review platform-specific synthetic content disclosure requirements."
+            )
+        if any(w in corpus for w in ["sponsor", "affiliate", "partner", "discount", "paid promotion"]):
+            platform_advisories["commercial_disclosure_notice"] = (
+                "Advisory notice: Commercial or affiliate relationships require standard platform commercial content disclosures."
+            )
         if len(matched_neg) > 0 or "secret" in corpus:
-            platform_advisories["repetition_risk"] = "Low-value pattern warning: verify original evidence to prevent duplicate or repetitive content."
+            platform_advisories["low_value_pattern_notice"] = (
+                "Advisory notice: Sensationalist or repetitive patterns may impact audience trust. Ensure verifiable evidence is provided."
+            )
 
         # Summary Reason Construction
         if passed:

@@ -15,6 +15,8 @@ from sqlalchemy.orm import selectinload
 from app.core.database import get_db
 from app.engines.export.contracts import ExportEngineInput
 from app.engines.export.engine import ExportEngine
+from app.engines.quality_gate.contracts import DimensionStatus
+from app.engines.quality_gate.evaluator import QualityGateEvaluator
 from app.models.brand import BrandProfile, SINGLETON_BRAND_ID
 from app.models.content_family import ContentFamily, ContentItem
 from app.models.evidence import Claim, ClaimEvidence, EvidenceSource
@@ -170,6 +172,35 @@ async def create_export_package(
                     detail=(
                         "Final Quality Gate Stale Block: A new script draft was created after final quality gate approval. "
                         "Re-evaluate and re-approve the quality gate audit before exporting."
+                    ),
+                )
+
+    # 4. Stale Audit Check: Ensure Niche Policy was not materially changed to block this content
+    niche_stmt = select(NicheProfile).where(NicheProfile.id == SINGLETON_NICHE_ID)
+    niche_res = await db.execute(niche_stmt)
+    current_niche = niche_res.scalar_one_or_none()
+
+    if current_niche:
+        niche_metrics = (audit.niche_fit or {}).get("metrics", {})
+        audit_fingerprint = niche_metrics.get("policy_fingerprint")
+
+        # If policy fingerprint differs (material policy revision)
+        if audit_fingerprint != current_niche.policy_fingerprint:
+            evaluator = QualityGateEvaluator()
+            current_dim, _ = evaluator._eval_niche(
+                niche=current_niche,
+                item=item,
+                script=script,
+                family=getattr(item, "family", None),
+                packet=None,
+            )
+            if current_dim.status == DimensionStatus.BLOCKED:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"Final Quality Gate Stale Block: The active niche policy has been materially updated "
+                        f"(version {current_niche.policy_version}) and this content is now BLOCKED by current niche rules: "
+                        f"{current_dim.summary}. Re-evaluate Quality Gate before exporting."
                     ),
                 )
 

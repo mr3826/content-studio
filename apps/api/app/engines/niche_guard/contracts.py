@@ -49,10 +49,10 @@ class NicheGuardVerdict(BaseModel):
     factors: List[NicheGuardFactor] = Field(default_factory=list, description="Score component breakdown")
     audience_value_breakdown: Dict[str, float] = Field(
         default_factory=dict,
-        description="Audience value dimensions: topic_relevance, audience_fit, problem_relevance, practical_value, evidence_potential",
+        description="Indicative screening heuristics (0.0-100.0) based on lexical match with persona, problem keywords, and practical terms. Factual verification is conducted in Research Engine.",
     )
     platform_warning_metadata: Dict[str, Any] = Field(
         default_factory=dict,
-        description="Advisory platform guidance (synthetic disclosure, commercial notice, repetitive risk)",
+        description="Advisory publishing notices (synthetic media, commercial disclosure, repetition risk). Does not guarantee platform monetization or community guidelines compliance.",
     )
     evaluated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

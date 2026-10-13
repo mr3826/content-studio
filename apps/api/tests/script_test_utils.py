@@ -53,6 +53,8 @@ async def prepare_script_inputs(
                 {"id": "p4", "name": "Media", "keywords": ["media", "render", "video"]},
             ],
             must_have_signals=["reproducible benchmark", "code repository"],
+            policy_version=1,
+            policy_fingerprint="fp_test_initial_fixture",
         )
         db.add(niche_row)
         await db.flush()
