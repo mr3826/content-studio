@@ -232,10 +232,18 @@ async def create_manual_signal(
     )
     result = await engine.run(context)
 
-    # Return the newly created/updated topic
+    # Return the newly created/updated topic containing this signal
     repo = TrendRepository(db)
     if result.outputs:
-        topic_key = result.outputs[0].get("topic_key")
+        matching_output = next(
+            (
+                out for out in result.outputs
+                if any(s.get("signal_id") == sig.signal_id for s in out.get("signals", []))
+                or out.get("title") == sig.title
+            ),
+            result.outputs[0]
+        )
+        topic_key = matching_output.get("topic_key")
         if topic_key:
             topic = await repo.get_by_key(topic_key)
             if topic:

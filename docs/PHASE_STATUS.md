@@ -29,6 +29,7 @@
 | **Phase 22** | Final E2E Certification | PASS | `ca0a5ec` | 117 pytest passed, web build passed | Complete 24-step creator journey certified, 10 invariants validated, 24 static pages verified |
 | **Phase 23** | Evidence-Grounded AI Script Studio | PASS | `3826db8` | 295 backend/engine/worker tests passed, 1 live smoke skipped; TypeScript, 24-route production build, both browser smokes, and live Gemini smoke passed | Gemini-only release acceptance and integration are verified on `master`; PRs #1, #2, and #3 are merged. |
 | **Phase 24** | Hybrid Category Sidebar & Action-Based Creator Workflow | PASS | `—` | 295 passed, 1 opt-in live smoke skipped; TypeScript, 24-route production build, creator workflow, Script Studio, and Gemini UI browser smokes passed | Persisted current-work summary and architecture map added. Human gates and manual publishing remain unchanged. |
+| **V1.02** | Context-Aware Niche Foundation Upgrade | PASS | `feat/v1-02-niche-foundation` | 297 passed, 1 opt-in live smoke skipped; TypeScript & Next.js production build passed | Context-aware 5-class semantic taxonomy, policy fingerprinting & audits, real Quality Gate evaluation, safe DB failure, Settings dry-run preview, 50-item benchmark (100% precision/recall) |
 
 ## Phase 23 certification — 2026-10-10
 
@@ -72,6 +73,27 @@ Phase 24 is **PASS** on `feat/v1-01-structural-backbone`, based on integrated `m
 - `git diff --check` — **passed**.
 
 No live Gemini or other provider request was made during Phase 24. The opt-in provider test remained skipped by the guarded suite. No provider, prompt, media engine, worker, or backend contract behavior changed.
+
+## V1.02 Niche Foundation Upgrade implementation and verification — 2026-10-13
+
+Phase V1.02 is **PASS** on `feat/v1-02-niche-foundation`, stacked on `feat/v1-01-structural-backbone` (PR #4 HEAD commit `a0bfa3f`). The upgrade modernizes the Niche Profile and Niche Guard engine into a context-aware, 5-class semantic taxonomy with SHA-256 policy fingerprinting, an immutable audit log, authentic Quality Gate evaluation, safe database failure behavior, an interactive Settings dry-run preview panel, and 100% precision/recall across a 50-case benchmark.
+
+### Acceptance verification
+
+- Combined backend, engine, and worker test suite: `uv run --locked pytest -p phase23_test_isolation apps/api/tests apps/api/app/engines worker/tests -q -ra --tb=short` — **297 passed, 1 skipped (opt-in live smoke) in 129.63 s**. Includes the full 24-step creator lifecycle certification and isolated SQLite WAL environment.
+- 50-case behavioral benchmark suite: `uv run --locked pytest apps/api/tests/test_niche_benchmark.py -q -ra` — **1 passed** (exercising all 50 cases), demonstrating:
+  - Accuracy: **100.0%** (50/50 correctly classified)
+  - Precision: **100.0%**
+  - Recall: **100.0%**
+  - False Positive Rate: **0.0%**
+  - False Negative Rate: **0.0%**
+  - Ambiguous / Review Rate: **28.0%** (14/50 correctly routed to human review)
+  - Mean evaluation latency: **~0.12 ms** (sub-millisecond deterministic evaluation)
+- Quality Gate real evaluation verification: `QualityGateEvaluator._eval_niche()` replaced hardcoded constant 92.0 score with typed Niche Guard evaluation of full item, family, and packet context; properly isolates blocked/off-niche vs warning/ambiguous.
+- Frontend TypeScript check: `node_modules/.bin/tsc.cmd --noEmit` from `apps/web` — **passed with 0 errors**.
+- Next.js production build: `npm run build` from `apps/web` — **passed**, all **24 routes** compiled and generated.
+- Invariants preserved: Single Niche (`primary`), Single Brand singleton, Human Quality Gates, local-first SQLite WAL, zero live AI calls during tests, zero secrets in git.
+- Stacked PR: targets `feat/v1-01-structural-backbone` without auto-merging.
 
 ## Historical Phase 23 verification update — 2026-10-10 (pre-Gemini-only revision)
 

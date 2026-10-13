@@ -44,22 +44,46 @@ def calculate_opportunity_score(
     text_lower = f"{title} {summary}".lower()
     words = set(re.findall(r'\b[a-z0-9_-]{3,}\b', text_lower))
 
-    # 1. Niche Fit (max 18)
-    niche_fit = 10.0  # default baseline
+    # 1. Niche Fit (authoritative Niche Guard evaluation, max 18)
+    niche_fit = 10.0  # default baseline for offline/test context
     if niche:
-        # Check allowed topics and content pillars
-        allowed = set(t.lower() for t in niche.allowed_topics)
-        pillars = set(p.get("name", "").lower() for p in niche.content_pillars if isinstance(p, dict))
-        if any(a in text_lower for a in allowed) or any(p in text_lower for p in pillars):
-            niche_fit = w_niche  # 18.0
-        elif pillar:
-            niche_fit = 15.0
+        from app.engines.niche_guard.contracts import NicheGuardInput
+        from app.engines.niche_guard.engine import NicheGuardEngine
 
-        # Negative keywords heavy penalty
-        if any(neg.lower() in text_lower for neg in niche.negative_keywords):
-            niche_fit = max(0.0, niche_fit - 12.0)
-    else:
-        niche_fit = 14.0
+        niche_dict = {
+            "name": getattr(niche, "name", ""),
+            "one_sentence_definition": getattr(niche, "one_sentence_definition", ""),
+            "audience": getattr(niche, "audience", ""),
+            "target_skill_levels": getattr(niche, "target_skill_levels", []) or [],
+            "audience_goals": getattr(niche, "audience_goals", []) or [],
+            "allowed_topics": getattr(niche, "allowed_topics", []) or [],
+            "adjacent_topics": getattr(niche, "adjacent_topics", []) or [],
+            "blocked_topics": getattr(niche, "blocked_topics", []) or [],
+            "topic_exceptions": getattr(niche, "topic_exceptions", []) or [],
+            "must_have_signals": getattr(niche, "must_have_signals", []) or [],
+            "negative_keywords": getattr(niche, "negative_keywords", []) or [],
+            "content_pillars": getattr(niche, "content_pillars", []) or [],
+            "primary_problems": getattr(niche, "primary_problems", []) or [],
+            "commercial_intent_topics": getattr(niche, "commercial_intent_topics", []) or [],
+            "evergreen_topics": getattr(niche, "evergreen_topics", []) or [],
+            "policy_version": getattr(niche, "policy_version", 1),
+            "policy_fingerprint": getattr(niche, "policy_fingerprint", None),
+        }
+        guard_input = NicheGuardInput(
+            title=title,
+            text=summary,
+            tags=[pillar] if pillar else [],
+        )
+        guard_engine = NicheGuardEngine()
+        verdict = guard_engine.evaluate_item(guard_input, niche_dict)
+        if verdict.is_blocked:
+            niche_fit = 0.0
+        else:
+            # Scaled to w_niche (max 18.0)
+            niche_fit = round((verdict.score / 100.0) * w_niche, 2)
+            if verdict.passed and niche_fit < 15.0 and (pillar or len(verdict.matched_allowed_topics) > 0):
+                niche_fit = max(niche_fit, 15.0)
+
 
     # 2. Original Test / Value Potential (max 20)
     # Technical benchmarks, speed tests, teardowns, empirical tests score highest

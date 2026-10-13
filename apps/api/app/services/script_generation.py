@@ -412,14 +412,21 @@ class ScriptGenerationService:
                 raise ScriptGenerationError(
                     "Generated script contains brand-banned phrases: " + ", ".join(banned_phrases) + "."
                 )
-            blocked_topics = [
-                phrase for phrase in request.niche_blocked_topics
-                if phrase and phrase.casefold() in generated_text
-            ]
-            if blocked_topics:
+            from app.engines.niche_guard.engine import NicheGuardEngine
+            guard_engine = NicheGuardEngine()
+            hard_blocked = []
+            for phrase in request.niche_blocked_topics:
+                if phrase and phrase.casefold() in generated_text:
+                    is_critique, _ = guard_engine._is_contextual_critique_or_negation(
+                        term=phrase, corpus=generated_text, raw_text=generated_text, niche={}
+                    )
+                    if not is_critique:
+                        hard_blocked.append(phrase)
+            if hard_blocked:
                 raise ScriptGenerationError(
-                    "Generated script includes blocked niche topics: " + ", ".join(blocked_topics) + "."
+                    "Generated script includes blocked niche topics: " + ", ".join(hard_blocked) + "."
                 )
+
             total_words = sum(section.word_count for section in sections)
             self.validate_total_word_count(request.format, request.target_duration_sec, total_words)
             unsupported = self._unsupported_metrics(" ".join(all_text), numeric_evidence)
@@ -789,14 +796,21 @@ class ScriptGenerationService:
             raise ScriptGenerationError(
                 "Refinement contains brand-banned phrases: " + ", ".join(banned_phrases) + "."
             )
-        blocked_topics = [
-            phrase for phrase in request.niche_blocked_topics
-            if phrase and phrase.casefold() in refined_text
-        ]
-        if blocked_topics:
+        from app.engines.niche_guard.engine import NicheGuardEngine
+        guard_engine = NicheGuardEngine()
+        hard_blocked = []
+        for phrase in request.niche_blocked_topics:
+            if phrase and phrase.casefold() in refined_text:
+                is_critique, _ = guard_engine._is_contextual_critique_or_negation(
+                    term=phrase, corpus=refined_text, raw_text=refined_text, niche={}
+                )
+                if not is_critique:
+                    hard_blocked.append(phrase)
+        if hard_blocked:
             raise ScriptGenerationError(
-                "Refinement includes blocked niche topics: " + ", ".join(blocked_topics) + "."
+                "Refinement includes blocked niche topics: " + ", ".join(hard_blocked) + "."
             )
+
         if response.provider == "gemini":
             unsupported = self._unsupported_metrics(
                 narration + " " + refined.visual_cue,

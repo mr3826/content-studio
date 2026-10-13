@@ -10,6 +10,7 @@ from app.engines.ai.contracts import AIResponse
 from app.main import app
 from app.models.content_family import ContentFamily, ContentItem, ContentItemEvidenceSelection
 from app.models.evidence import Claim, ClaimEvidence, EvidenceSource
+from app.models.niche import NicheProfile
 from app.models.opportunity import Opportunity
 from app.models.originality import OriginalityPlan
 from app.models.research import ResearchPacket
@@ -34,6 +35,44 @@ async def prepare_script_inputs(
     if not family:
         raise AssertionError(f"test fixture family for {content_item_id} was not found")
     topic = topic or item.working_title or family.title
+
+    # Ensure active niche profile in test DB accommodates the test's content pillar
+    niche_row = await db.get(NicheProfile, "primary")
+    if not niche_row:
+        niche_row = NicheProfile(
+            id="primary",
+            name="AI Engineering & Systems Studio",
+            one_sentence_definition="Engineering benchmarks and developer workflows.",
+            audience="Software engineers and builders.",
+            allowed_topics=["coding agents", "local llms", "developer tools", "systems", "benchmark", "quality gate"],
+            adjacent_topics=["devops", "workflow builds", "media", "core systems"],
+            content_pillars=[
+                {"id": "p1", "name": "Core Systems", "keywords": ["systems", "quality gate", "benchmark"]},
+                {"id": "p2", "name": "Coding Agents", "keywords": ["coding", "agents", "local"]},
+                {"id": "p3", "name": "Workflow Builds", "keywords": ["workflow", "builds", "automation"]},
+                {"id": "p4", "name": "Media", "keywords": ["media", "render", "video"]},
+            ],
+            must_have_signals=["reproducible benchmark", "code repository"],
+        )
+        db.add(niche_row)
+        await db.flush()
+    else:
+        if family.content_pillar:
+            existing_pillars = list(niche_row.content_pillars or [])
+            existing_pillar_names = [p.get("name") if isinstance(p, dict) else str(p) for p in existing_pillars]
+            if family.content_pillar not in existing_pillar_names:
+                existing_pillars.append({
+                    "id": f"p_{uuid.uuid4().hex[:6]}",
+                    "name": family.content_pillar,
+                    "description": f"{family.content_pillar} benchmarks and workflows",
+                    "keywords": [family.content_pillar.lower()],
+                })
+                niche_row.content_pillars = existing_pillars
+            existing_allowed = list(niche_row.allowed_topics or [])
+            if family.content_pillar.lower() not in [t.lower() for t in existing_allowed]:
+                existing_allowed.append(family.content_pillar.lower())
+                niche_row.allowed_topics = existing_allowed
+            await db.flush()
 
     token = uuid.uuid4().hex
     topic_row = Opportunity(
