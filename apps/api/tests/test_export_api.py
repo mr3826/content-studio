@@ -487,3 +487,52 @@ async def test_repeated_export_requests(client: AsyncClient, db_session: AsyncSe
     assert pkg1["package_slug"] == pkg2["package_slug"]
     assert len(pkg2["checksum"]) == 64
     assert pkg1["files"] == pkg2["files"]
+
+
+@pytest.mark.asyncio
+async def test_export_gate_blocks_when_niche_policy_modified_to_block_topic(client: AsyncClient, db_session: AsyncSession, monkeypatch):
+    """Verify that if the active niche policy is materially updated to block a topic,
+    a previously approved item cannot be exported without re-evaluation (Section 6 Policy Freshness)."""
+    test_id = uuid.uuid4().hex[:6]
+
+    # 1. Setup compliant item
+    fam = (await client.post(
+        "/api/v1/content-families",
+        json={"title": f"Agent Coding Automation {test_id}", "content_pillar": "Core", "original_value_type": "benchmark"},
+    )).json()
+    item = (await client.post(
+        f"/api/v1/content-families/{fam['id']}/items",
+        json={
+            "format": "short_vertical",
+            "platform_target": "youtube",
+            "working_title": f"Coding Agents Benchmark {test_id}",
+            "angle": "Empirical local benchmark.",
+            "hook_type": "bold_claim",
+            "original_value_connection": "Local benchmark scripts.",
+            "viewer_value": "Performance measurements.",
+        },
+    )).json()
+    await prepare_script_inputs(db_session, item["id"])
+    install_script_provider_fixture(monkeypatch)
+
+    script = (await client.post("/api/v1/scripts/generate", json={"content_item_id": item["id"]})).json()
+    await client.post(f"/api/v1/scripts/{script['id']}/approve", json={"notes": "Approved"})
+    await client.post(f"/api/v1/quality-gate/evaluate/{item['id']}")
+    await client.post(f"/api/v1/quality-gate/approve/{item['id']}", json={"approved_by": "Creator"})
+
+    # 2. Creator materially modifies niche policy to explicitly block 'coding agents'
+    niche_curr = (await client.get("/api/v1/niche")).json()
+    niche_curr["blocked_topics"].append("coding agents")
+    put_res = await client.put("/api/v1/niche", json=niche_curr)
+    assert put_res.status_code == 200
+    assert put_res.json()["policy_version"] > niche_curr["policy_version"]
+
+    # 3. Export must now be BLOCKED due to stale policy and current block!
+    exp_res = await client.post(f"/api/v1/export/{item['id']}")
+    assert exp_res.status_code == 422
+    assert "Final Quality Gate Stale Block" in exp_res.json()["detail"]
+    assert "materially updated" in exp_res.json()["detail"]
+
+    # Restore niche profile to prevent cross-test contamination
+    niche_curr["blocked_topics"].remove("coding agents")
+    await client.put("/api/v1/niche", json=niche_curr)

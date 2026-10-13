@@ -8,6 +8,16 @@ audience_regions:
   - "Europe"
   - "Global Developer Community"
 
+target_skill_levels:
+  - "Intermediate Software Engineer"
+  - "Senior Fullstack / DevOps Engineer"
+  - "Technical Lead"
+
+audience_goals:
+  - "Automate repetitive coding and testing tasks safely"
+  - "Deploy local models with minimal latency and zero cloud data leaks"
+  - "Objectively evaluate agent claims against messy legacy codebases"
+
 primary_problems:
   - "Agent benchmark claims do not match real-world coding performance."
   - "High API costs and token limits for agentic workflows."
@@ -35,6 +45,20 @@ blocked_topics:
   - "passive income schemes"
   - "clickbait AI news without code/tests"
 
+topic_exceptions:
+  - topic_or_keyword: "passive income schemes"
+    allowed_contexts:
+      - "debunking"
+      - "criticism"
+      - "quotation"
+    notes: "Educational debunking of passive income claims is permitted."
+  - topic_or_keyword: "replaced all coders"
+    allowed_contexts:
+      - "negation"
+      - "criticism"
+      - "quotation"
+    notes: "Critical analysis or negation of replacement claims is permitted."
+
 must_have_signals:
   - "code repository"
   - "reproducible benchmark"
@@ -57,12 +81,43 @@ content_pillars:
   - id: "agent_benchmarks"
     name: "Coding Agent Stress Tests"
     description: "Real-world testing of Claude 3.7, Gemini 2.5, Qwen 2.5 Coder on dirty repos."
+    keywords:
+      - "coding agents"
+      - "benchmark"
+      - "stress test"
+      - "dirty repo"
+      - "agent evaluation"
+    synonyms:
+      - "Agent benchmarks"
+      - "Coding agent evals"
+    examples:
+      - "Benchmarking AI coding agents on large legacy repositories"
   - id: "local_tooling"
     name: "Local Models & Tooling"
     description: "Ollama, vLLM, DeepSeek, and local inference benchmarks."
+    keywords:
+      - "ollama"
+      - "vllm"
+      - "local inference"
+      - "deepseek"
+      - "local llm"
+    synonyms:
+      - "Local LLM setups"
+      - "On-premise AI tooling"
+    examples:
+      - "Local Qwen 2.5 Coder vs Claude 3.7 latency and token cost analysis"
   - id: "automation_recipes"
     name: "Production Automation Recipes"
     description: "End-to-end coding workflows that save 5+ hours/week."
+    keywords:
+      - "workflow automation"
+      - "developer productivity"
+      - "automation recipe"
+      - "ci script"
+    synonyms:
+      - "Developer automation recipes"
+    examples:
+      - "Building deterministic AI pipelines with local tooling"
 
 commercial_intent_topics:
   - "developer productivity tools"

@@ -44,22 +44,47 @@ def calculate_opportunity_score(
     text_lower = f"{title} {summary}".lower()
     words = set(re.findall(r'\b[a-z0-9_-]{3,}\b', text_lower))
 
-    # 1. Niche Fit (max 18)
-    niche_fit = 10.0  # default baseline
+    # 1. Niche Fit (authoritative Niche Guard evaluation, max 18)
+    niche_fit = 10.0  # default baseline for offline/test context
+    verdict = None
     if niche:
-        # Check allowed topics and content pillars
-        allowed = set(t.lower() for t in niche.allowed_topics)
-        pillars = set(p.get("name", "").lower() for p in niche.content_pillars if isinstance(p, dict))
-        if any(a in text_lower for a in allowed) or any(p in text_lower for p in pillars):
-            niche_fit = w_niche  # 18.0
-        elif pillar:
-            niche_fit = 15.0
+        from app.engines.niche_guard.contracts import NicheGuardInput
+        from app.engines.niche_guard.engine import NicheGuardEngine
 
-        # Negative keywords heavy penalty
-        if any(neg.lower() in text_lower for neg in niche.negative_keywords):
-            niche_fit = max(0.0, niche_fit - 12.0)
-    else:
-        niche_fit = 14.0
+        niche_dict = {
+            "name": getattr(niche, "name", ""),
+            "one_sentence_definition": getattr(niche, "one_sentence_definition", ""),
+            "audience": getattr(niche, "audience", ""),
+            "target_skill_levels": getattr(niche, "target_skill_levels", []) or [],
+            "audience_goals": getattr(niche, "audience_goals", []) or [],
+            "allowed_topics": getattr(niche, "allowed_topics", []) or [],
+            "adjacent_topics": getattr(niche, "adjacent_topics", []) or [],
+            "blocked_topics": getattr(niche, "blocked_topics", []) or [],
+            "topic_exceptions": getattr(niche, "topic_exceptions", []) or [],
+            "must_have_signals": getattr(niche, "must_have_signals", []) or [],
+            "negative_keywords": getattr(niche, "negative_keywords", []) or [],
+            "content_pillars": getattr(niche, "content_pillars", []) or [],
+            "primary_problems": getattr(niche, "primary_problems", []) or [],
+            "commercial_intent_topics": getattr(niche, "commercial_intent_topics", []) or [],
+            "evergreen_topics": getattr(niche, "evergreen_topics", []) or [],
+            "policy_version": getattr(niche, "policy_version", 1),
+            "policy_fingerprint": getattr(niche, "policy_fingerprint", None),
+        }
+        guard_input = NicheGuardInput(
+            title=title,
+            text=summary,
+            tags=[pillar] if pillar else [],
+        )
+        guard_engine = NicheGuardEngine()
+        verdict = guard_engine.evaluate_item(guard_input, niche_dict)
+        if verdict.is_blocked:
+            niche_fit = 0.0
+        else:
+            # Scaled to w_niche (max 18.0)
+            niche_fit = round((verdict.score / 100.0) * w_niche, 2)
+            if verdict.passed and niche_fit < 15.0 and (pillar or len(verdict.matched_allowed_topics) > 0):
+                niche_fit = max(niche_fit, 15.0)
+
 
     # 2. Original Test / Value Potential (max 20)
     # Technical benchmarks, speed tests, teardowns, empirical tests score highest
@@ -214,24 +239,64 @@ def calculate_opportunity_score(
     if not risks:
         risks.append("Standard verification needed: confirm claims against official documentation before script approval.")
 
-    # Recommended Action & Why
-    if final_score >= 70.0:
-        recommended_action = "Research"
-        why = (
-            f"Strong niche fit ({niche_fit:.1f}/18) with exceptional original test potential ({original_value:.1f}/20). "
-            f"Directly addresses audience problem areas with {content_family} potential."
-        )
-    elif final_score >= 45.0:
-        recommended_action = "Watch"
-        why = (
-            f"Moderate opportunity score ({final_score:.1f}/100). High niche relevance but requires stronger trend momentum "
-            f"or further empirical confirmation before committing production resources."
-        )
+    # Check Niche Guard review propagation
+    if verdict:
+        if verdict.is_blocked or verdict.classification == "off_niche":
+            recommended_action = "Reject"
+            why = f"Rejected by Niche Guard ({verdict.classification}): {verdict.reason}"
+            risks.append(f"Niche Block: {verdict.reason}")
+        elif verdict.requires_review or verdict.classification in ("ambiguous", "adjacent"):
+            risks.append(f"Niche Review Required: {'; '.join(verdict.review_reasons or [verdict.reason])}")
+            if final_score >= 70.0:
+                recommended_action = "Review Niche Alignment"
+                why = (
+                    f"Strong potential ({final_score:.1f}/100) but topic is {verdict.classification}. "
+                    f"Requires creator editorial review before proceeding to research: {verdict.reason}"
+                )
+            elif final_score >= 45.0:
+                recommended_action = "Watch"
+                why = f"Moderate score ({final_score:.1f}/100) requiring creator niche review: {verdict.reason}"
+            else:
+                recommended_action = "Reject"
+                why = f"Sub-threshold score ({final_score:.1f}/100) with unverified niche alignment: {verdict.reason}"
+        else:
+            # Standard core niche pass
+            if final_score >= 70.0:
+                recommended_action = "Research"
+                why = (
+                    f"Strong niche fit ({niche_fit:.1f}/18) with exceptional original test potential ({original_value:.1f}/20). "
+                    f"Directly addresses audience problem areas with {content_family} potential."
+                )
+            elif final_score >= 45.0:
+                recommended_action = "Watch"
+                why = (
+                    f"Moderate opportunity score ({final_score:.1f}/100). High niche relevance but requires stronger trend momentum "
+                    f"or further empirical confirmation before committing production resources."
+                )
+            else:
+                recommended_action = "Reject"
+                why = (
+                    f"Sub-threshold score ({final_score:.1f}/100) due to low original test potential or high channel saturation penalty."
+                )
     else:
-        recommended_action = "Reject"
-        why = (
-            f"Sub-threshold score ({final_score:.1f}/100) due to low original test potential or high channel saturation penalty."
-        )
+        # Fallback when evaluated without active niche fixture
+        if final_score >= 70.0:
+            recommended_action = "Research"
+            why = (
+                f"Strong niche fit ({niche_fit:.1f}/18) with exceptional original test potential ({original_value:.1f}/20). "
+                f"Directly addresses audience problem areas with {content_family} potential."
+            )
+        elif final_score >= 45.0:
+            recommended_action = "Watch"
+            why = (
+                f"Moderate opportunity score ({final_score:.1f}/100). High niche relevance but requires stronger trend momentum "
+                f"or further empirical confirmation before committing production resources."
+            )
+        else:
+            recommended_action = "Reject"
+            why = (
+                f"Sub-threshold score ({final_score:.1f}/100) due to low original test potential or high channel saturation penalty."
+            )
 
     meta = {
         "production_effort": production_effort,
@@ -242,6 +307,7 @@ def calculate_opportunity_score(
         "risks": risks,
         "why": why,
         "recommended_action": recommended_action,
+        "niche_verdict": verdict.model_dump(mode="json") if verdict else None,
     }
 
     return breakdown, meta

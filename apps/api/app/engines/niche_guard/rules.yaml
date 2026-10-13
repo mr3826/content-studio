@@ -1,9 +1,10 @@
-version: 1.0.0
+version: 1.1.0
 thresholds:
   min_pass_score: 55.0
   negative_keyword_penalty: 25.0
   missing_must_have_penalty: 15.0
   adjacent_penalty: 10.0
+  ambiguous_margin: 8.0
 weights:
   pillar_match_max: 35.0
   pillar_unit_weight: 20.0
@@ -13,6 +14,10 @@ weights:
   must_have_unit_weight: 8.0
   primary_problem_max: 10.0
   primary_problem_unit_weight: 5.0
+  audience_fit_max: 15.0
+  practical_value_max: 10.0
 behavior:
   instant_block_on_blocked_topic: true
   require_allowed_or_pillar: true
+  context_aware_critique: true
+  safe_failure_on_missing_config: true

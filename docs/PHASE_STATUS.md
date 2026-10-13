@@ -29,6 +29,7 @@
 | **Phase 22** | Final E2E Certification | PASS | `ca0a5ec` | 117 pytest passed, web build passed | Complete 24-step creator journey certified, 10 invariants validated, 24 static pages verified |
 | **Phase 23** | Evidence-Grounded AI Script Studio | PASS | `3826db8` | 295 backend/engine/worker tests passed, 1 live smoke skipped; TypeScript, 24-route production build, both browser smokes, and live Gemini smoke passed | Gemini-only release acceptance and integration are verified on `master`; PRs #1, #2, and #3 are merged. |
 | **Phase 24** | Hybrid Category Sidebar & Action-Based Creator Workflow | PASS | `—` | 295 passed, 1 opt-in live smoke skipped; TypeScript, 24-route production build, creator workflow, Script Studio, and Gemini UI browser smokes passed | Persisted current-work summary and architecture map added. Human gates and manual publishing remain unchanged. |
+| **V1.02** | Context-Aware Niche Foundation Upgrade & Hardening | PASS | `feat/v1-02-niche-foundation` | 302 passed, 1 opt-in live smoke skipped; TypeScript & Next.js production build passed | Context-aware 5-class semantic taxonomy, policy fingerprinting & audits, real Quality Gate evaluation (mock fallback eliminated, self-validating rules eliminated), export freshness gate, downstream review propagation in Opportunity engine, honest heuristic scoring, dynamic profile configurability, 50-item benchmark (100% prec/rec), 20-item holdout benchmark (0 unchecked false positives, 0 blocked false negatives), Alembic upgrade & rollback verified on disposable DB |
 
 ## Phase 23 certification — 2026-10-10
 
@@ -72,6 +73,25 @@ Phase 24 is **PASS** on `feat/v1-01-structural-backbone`, based on integrated `m
 - `git diff --check` — **passed**.
 
 No live Gemini or other provider request was made during Phase 24. The opt-in provider test remained skipped by the guarded suite. No provider, prompt, media engine, worker, or backend contract behavior changed.
+
+## V1.02 Niche Foundation Upgrade implementation and verification — 2026-10-13
+
+Phase V1.02 is **PASS** on `feat/v1-02-niche-foundation`, stacked on `feat/v1-01-structural-backbone` (PR #4 HEAD commit `a0bfa3f`). The upgrade modernizes the Niche Profile and Niche Guard engine into a context-aware, 5-class semantic taxonomy with SHA-256 policy fingerprinting, an immutable audit log, authentic Quality Gate evaluation, safe database failure behavior, an interactive Settings dry-run preview panel, and verified benchmarks.
+
+### Independent Review, Hardening & Acceptance Verification
+- Combined backend, engine, and worker test suite: `uv run --locked pytest -p phase23_test_isolation apps/api/tests apps/api/app/engines worker/tests -q -ra --tb=short` — **302 passed, 1 skipped (opt-in live smoke) in 99.91 s**. Includes the full 24-step creator lifecycle certification and isolated SQLite WAL environment.
+- Elimination of AI Mock Mode Niche Fallback: `QualityGateEvaluator._eval_niche()` no longer synthesizes an example profile when `AI_MOCK_MODE=True`. Missing database profile produces a truthful `DimensionStatus.BLOCKED` (score 0.0) routing to `/settings`.
+- Elimination of Self-Validating Content Rules: Policy allowlists are never derived from candidate titles. Unconfigured profiles yield an explainable blocked status.
+- Downstream Review-Required Propagation: Opportunity engine detects ambiguous and adjacent classifications, attaches risk notices, and routes `recommended_action="Review Niche Alignment"` to prevent skipping human oversight.
+- Export Gate Policy Freshness: Final export re-evaluates scripts against active niche fingerprint; if policy changed and item is now blocked or off-niche, export returns HTTP 422.
+- 50-case benchmark suite: `uv run --locked pytest apps/api/tests/test_niche_benchmark.py -q -ra` — **2 passed (50/50 cases)** with 100% precision/recall and sub-millisecond evaluation.
+- 20-case independent holdout benchmark suite: `uv run --locked pytest apps/api/tests/test_niche_holdout_benchmark.py -q -ra` — **1 passed (20 holdout cases)** across technical AI Systems and non-technical Artisan Sourdough profiles: 0 unchecked false positives, 0 blocked false negatives, 75.0% pass decision accuracy, 90.0% review flag accuracy.
+- Database migration & rollback verification: `apps/api/tests/test_niche_migration.py` — **1 passed**, verifying Alembic upgrade from V1.01 (`b1c2d3e4f5a6`) to V1.02 (`c2d3e4f5a6b7`) and clean rollback on a disposable SQLite database with zero profile or content data loss.
+- Frontend TypeScript check: `node_modules/.bin/tsc.cmd --noEmit` from `apps/web` — **passed with 0 errors**.
+- Next.js production build: `npm run build` from `apps/web` — **passed**, all **24 routes** compiled and generated.
+- Invariants preserved: Single Niche (`primary`), Single Brand singleton, Human Quality Gates, local-first SQLite WAL, zero live AI calls during tests, zero secrets in git.
+- Stacked PR: targets `feat/v1-01-structural-backbone` without auto-merging.
+
 
 ## Historical Phase 23 verification update — 2026-10-10 (pre-Gemini-only revision)
 

@@ -264,7 +264,11 @@ class RssEngine(BaseEngine):
                             await session.commit()
 
         # 5. Load active niche taxonomy for Niche Guard evaluation
-        niche_data = await self.niche_guard._get_active_niche_data()
+        niche_data = await self.niche_guard._get_active_niche_data(
+            override=context.parameters.get("niche_profile"),
+            allow_fallback=True,
+        )
+
 
         # 6. Load existing candidates from DB to ensure idempotency across runs
         db_candidates = await self._load_existing_db_candidates()

@@ -28,10 +28,18 @@ class NicheGuardVerdict(BaseModel):
     passed: bool = Field(..., description="True if content meets pass cutoff and has 0 blocked topics")
     score: float = Field(..., ge=0.0, le=100.0, description="Overall niche relevance score [0.0 - 100.0]")
     reason: str = Field(..., description="Summary explanation of the verdict")
+    classification: str = Field(
+        default="core_niche",
+        description="Categorical verdict: 'core_niche', 'adjacent', 'off_niche', 'blocked', 'ambiguous'",
+    )
+    requires_review: bool = Field(default=False, description="True if content requires creator editorial review")
+    review_reasons: List[str] = Field(default_factory=list, description="Reasons requiring human review")
     primary_pillar: Optional[str] = Field(default=None, description="Primary matched content pillar")
     is_adjacent: bool = Field(default=False, description="True if content matches adjacent topics without core topics")
     is_blocked: bool = Field(default=False, description="True if content triggered hard-blocked topic rules")
     audience_relevance: float = Field(default=0.0, ge=0.0, le=100.0, description="Audience relevance score")
+    policy_version: int = Field(default=1, description="Niche policy version that evaluated this item")
+    policy_fingerprint: Optional[str] = Field(default=None, description="Niche policy fingerprint")
     pillar_matches: List[str] = Field(default_factory=list, description="Matched content pillar names or IDs")
     matched_allowed_topics: List[str] = Field(default_factory=list, description="Matched allowed topics")
     matched_adjacent_topics: List[str] = Field(default_factory=list, description="Matched adjacent topics")
@@ -39,4 +47,12 @@ class NicheGuardVerdict(BaseModel):
     matched_negative_keywords: List[str] = Field(default_factory=list, description="Matched negative keywords")
     blocked_topics_detected: List[str] = Field(default_factory=list, description="Blocked topics triggering hard block")
     factors: List[NicheGuardFactor] = Field(default_factory=list, description="Score component breakdown")
+    audience_value_breakdown: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Indicative screening heuristics (0.0-100.0) based on lexical match with persona, problem keywords, and practical terms. Factual verification is conducted in Research Engine.",
+    )
+    platform_warning_metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Advisory publishing notices (synthetic media, commercial disclosure, repetition risk). Does not guarantee platform monetization or community guidelines compliance.",
+    )
     evaluated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

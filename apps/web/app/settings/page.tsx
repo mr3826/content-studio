@@ -14,12 +14,19 @@ import {
   CheckCircle, 
   AlertCircle,
   RefreshCw,
-  Brain
+  Brain,
+  History,
+  Play,
+  Info,
+  Tag
 } from "lucide-react";
+import { useLanguage } from "@/lib/LanguageContext";
 import {
   getNiche,
   updateNiche,
   seedNiche,
+  getNichePolicyAudits,
+  dryRunNiche,
   getBrand,
   updateBrand,
   seedBrand,
@@ -36,6 +43,11 @@ import {
   importSettings,
   seedAllSettings,
   NicheProfile,
+  NichePolicyAudit,
+  NicheDryRunResponse,
+  NicheGuardVerdict,
+  ContentPillar,
+  TopicException,
   BrandProfile,
   BrandExemplar,
   BrandMemoryItem,
@@ -45,6 +57,7 @@ import {
 type Tab = "niche" | "brand" | "memory" | "exemplars" | "platforms" | "transfer";
 
 export default function SettingsPage() {
+  const { t, isBangla } = useLanguage();
   const [activeTab, setActiveTab] = useState<Tab>("niche");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -55,18 +68,27 @@ export default function SettingsPage() {
     name: "",
     one_sentence_definition: "",
     audience: "",
+    target_skill_levels: [],
+    audience_goals: [],
     audience_regions: [],
     primary_problems: [],
     allowed_topics: [],
     adjacent_topics: [],
     blocked_topics: [],
+    topic_exceptions: [],
     must_have_signals: [],
     negative_keywords: [],
     preferred_source_types: [],
     content_pillars: [],
     commercial_intent_topics: [],
     evergreen_topics: [],
+    policy_version: 1,
+    policy_fingerprint: null,
   });
+  const [policyAudits, setPolicyAudits] = useState<NichePolicyAudit[]>([]);
+  const [testTopicInput, setTestTopicInput] = useState<string>("");
+  const [testingTopic, setTestingTopic] = useState<boolean>(false);
+  const [testDryRunResult, setTestDryRunResult] = useState<NicheDryRunResponse | null>(null);
 
   // Brand State
   const [brand, setBrand] = useState<BrandProfile>({
@@ -118,12 +140,13 @@ export default function SettingsPage() {
   const loadAll = async () => {
     setLoading(true);
     try {
-      const [nData, bData, exData, pData, mData] = await Promise.all([
+      const [nData, bData, exData, pData, mData, auditsData] = await Promise.all([
         getNiche(),
         getBrand(),
         getBrandExemplars(),
         getPlatforms(),
         getBrandMemory(),
+        getNichePolicyAudits(10),
       ]);
 
       if (nData) setNiche(nData);
@@ -131,6 +154,7 @@ export default function SettingsPage() {
       if (exData) setExemplars(exData);
       if (pData) setPlatforms(pData);
       if (mData) setMemoryItems(mData);
+      if (auditsData) setPolicyAudits(auditsData);
     } catch (e) {
       console.error("Error loading settings:", e);
     } finally {
@@ -153,7 +177,9 @@ export default function SettingsPage() {
     try {
       const updated = await updateNiche(niche);
       setNiche(updated);
-      showToast("success", "Single Niche Profile saved successfully!");
+      const audits = await getNichePolicyAudits(10);
+      setPolicyAudits(audits);
+      showToast("success", `Single Niche Profile saved! (Policy v${updated.policy_version || 1})`);
     } catch (e: any) {
       showToast("error", e.message || "Failed to save Niche Profile");
     } finally {
@@ -166,11 +192,81 @@ export default function SettingsPage() {
     try {
       const seeded = await seedNiche();
       setNiche(seeded);
+      const audits = await getNichePolicyAudits(10);
+      setPolicyAudits(audits);
       showToast("success", "Default Niche Profile seeded from template!");
     } catch (e: any) {
       showToast("error", e.message || "Failed to seed Niche");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Niche Pillar & Exception Handlers
+  const handleAddPillar = () => {
+    const newId = `pillar_${Date.now()}`;
+    const newPillar: ContentPillar = {
+      id: newId,
+      name: "",
+      description: "",
+      keywords: [],
+      synonyms: [],
+      examples: [],
+    };
+    setNiche({
+      ...niche,
+      content_pillars: [...(niche.content_pillars || []), newPillar],
+    });
+  };
+
+  const handleUpdatePillar = (index: number, field: keyof ContentPillar, val: any) => {
+    const updated = [...(niche.content_pillars || [])];
+    updated[index] = { ...updated[index], [field]: val };
+    setNiche({ ...niche, content_pillars: updated });
+  };
+
+  const handleDeletePillar = (index: number) => {
+    const updated = (niche.content_pillars || []).filter((_, i) => i !== index);
+    setNiche({ ...niche, content_pillars: updated });
+  };
+
+  const handleAddException = () => {
+    const newException: TopicException = {
+      topic: "",
+      allowed_context: "educational_critique",
+    };
+    setNiche({
+      ...niche,
+      topic_exceptions: [...(niche.topic_exceptions || []), newException],
+    });
+  };
+
+  const handleUpdateException = (index: number, field: keyof TopicException, val: string) => {
+    const updated = [...(niche.topic_exceptions || [])];
+    updated[index] = { ...updated[index], [field]: val };
+    setNiche({ ...niche, topic_exceptions: updated });
+  };
+
+  const handleDeleteException = (index: number) => {
+    const updated = (niche.topic_exceptions || []).filter((_, i) => i !== index);
+    setNiche({ ...niche, topic_exceptions: updated });
+  };
+
+  const handleRunTestTopic = async (candidateText?: string) => {
+    const textToTest = candidateText !== undefined ? candidateText : testTopicInput;
+    if (!textToTest.trim()) return;
+    setTestingTopic(true);
+    try {
+      const resp = await dryRunNiche({
+        candidate_topics: [textToTest.trim()],
+        proposed_profile: niche,
+      });
+      setTestDryRunResult(resp);
+      showToast("success", "Topic dry run evaluation complete!");
+    } catch (e: any) {
+      showToast("error", e.message || "Dry run evaluation failed");
+    } finally {
+      setTestingTopic(false);
     }
   };
 
@@ -481,12 +577,25 @@ export default function SettingsPage() {
 
       {/* Tab 1: Single Niche */}
       {activeTab === "niche" && (
-        <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-6">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+        <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-8">
+          {/* Top Bar with Policy Version and Actions */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-slate-800 pb-4 gap-4">
             <div>
-              <h2 className="text-base font-semibold text-white">Single Niche Profile</h2>
-              <p className="text-xs text-slate-400">
-                In accordance with invariant #1, exactly one active niche profile guides discovery and filtering.
+              <div className="flex items-center gap-3">
+                <h2 className="text-base font-semibold text-white">
+                  {t("settings.nicheTab.title", "Single Niche Profile")}
+                </h2>
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                  Policy v{niche.policy_version || 1}
+                </span>
+                {niche.policy_fingerprint && (
+                  <span className="hidden sm:inline-flex items-center font-mono text-[11px] text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded border border-slate-700/60" title={niche.policy_fingerprint}>
+                    SHA: {niche.policy_fingerprint.slice(0, 10)}...
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 mt-1">
+                {t("settings.nicheTab.subtitle", "In accordance with invariant #1, exactly one active niche profile guides discovery, opportunity scoring, and quality gates.")}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -494,27 +603,40 @@ export default function SettingsPage() {
                 type="button"
                 onClick={handleSeedNiche}
                 disabled={saving}
-                className="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                className="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors"
               >
-                Seed Example Niche
+                {t("settings.nicheTab.seedExample", "Seed Example Niche")}
               </button>
               <button
                 type="button"
                 onClick={handleSaveNiche}
                 disabled={saving}
-                className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20"
+                className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20 transition-colors"
               >
                 <Save className="w-3.5 h-3.5" />
-                {saving ? "Saving..." : "Save Niche Profile"}
+                {saving ? t("common.saving", "Saving...") : t("settings.nicheTab.save", "Save Niche Profile")}
               </button>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-4">
+          {/* Policy Invariant & Revision Notice */}
+          <div className="p-3.5 rounded-xl bg-indigo-950/20 border border-indigo-800/30 text-xs text-indigo-300 flex items-start gap-2.5">
+            <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-semibold">{t("settings.nicheTab.materialChangeNotice", "Material changes increment policy version and are tracked in audit history.")}</span>{" "}
+              Changes to allowed, adjacent, or blocked topics will recalculate subsequent discovery candidates and invalidate stale Quality Gate assessments.
+            </div>
+          </div>
+
+          {/* Section 1: Core Definition & Audience Profile */}
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold text-slate-200 uppercase tracking-wider">
+              1. Core Definition & Audience Target
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  Niche Name
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  {t("settings.nicheTab.name", "Niche Name")}
                 </label>
                 <input
                   type="text"
@@ -526,8 +648,8 @@ export default function SettingsPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  Target Audience
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  {t("settings.nicheTab.targetAudience", "Target Audience")}
                 </label>
                 <input
                   type="text"
@@ -539,74 +661,545 @@ export default function SettingsPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  One-Sentence Definition
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  {t("settings.nicheTab.skillLevels", "Target Skill Levels (Comma-separated)")}
+                </label>
+                <input
+                  type="text"
+                  value={(niche.target_skill_levels || []).join(", ")}
+                  onChange={(e) =>
+                    setNiche({
+                      ...niche,
+                      target_skill_levels: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                    })
+                  }
+                  placeholder="intermediate, advanced, professional"
+                  className="w-full px-3 py-2 text-sm rounded-lg bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  {t("settings.nicheTab.goals", "Audience Goals (Comma-separated)")}
+                </label>
+                <input
+                  type="text"
+                  value={(niche.audience_goals || []).join(", ")}
+                  onChange={(e) =>
+                    setNiche({
+                      ...niche,
+                      audience_goals: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                    })
+                  }
+                  placeholder="automate routine code refactoring, build reliable local agent pipelines"
+                  className="w-full px-3 py-2 text-sm rounded-lg bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  {t("settings.nicheTab.definition", "One-Sentence Definition")}
                 </label>
                 <textarea
-                  rows={3}
+                  rows={2}
                   value={niche.one_sentence_definition}
                   onChange={(e) => setNiche({ ...niche, one_sentence_definition: e.target.value })}
                   placeholder="Practical AI coding agents, developer automation workflows, and local LLM tooling tested on production tasks."
                   className="w-full px-3 py-2 text-sm rounded-lg bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
-            </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  Allowed Topics (Comma-separated)
+              <div className="md:col-span-2">
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  {t("settings.nicheTab.primaryProblems", "Primary Audience Problems (Comma-separated)")}
                 </label>
                 <input
                   type="text"
-                  value={niche.allowed_topics.join(", ")}
+                  value={(niche.primary_problems || []).join(", ")}
+                  onChange={(e) =>
+                    setNiche({
+                      ...niche,
+                      primary_problems: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                    })
+                  }
+                  placeholder="brittle prompts breaking in production, high API costs, hallucinated code"
+                  className="w-full px-3 py-2 text-sm rounded-lg bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Section 2: Editorial Topic Boundaries & Signals */}
+          <div className="space-y-4 pt-4 border-t border-slate-800">
+            <h3 className="text-sm font-semibold text-slate-200 uppercase tracking-wider">
+              2. Editorial Topic Boundaries & Alignment Signals
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  {t("settings.nicheTab.allowedTopics", "Allowed Core Topics (Comma-separated)")}
+                </label>
+                <input
+                  type="text"
+                  value={(niche.allowed_topics || []).join(", ")}
                   onChange={(e) =>
                     setNiche({
                       ...niche,
                       allowed_topics: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
                     })
                   }
-                  placeholder="coding agents, local LLMs, developer tools"
+                  placeholder="coding agents, local LLMs, developer tools, test automation"
                   className="w-full px-3 py-2 text-sm rounded-lg bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  Blocked Topics (Filtered out by Niche Guard)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-medium text-slate-300">
+                    {t("settings.nicheTab.adjacentTopics", "Relevant Adjacent Topics (Comma-separated)")}
+                  </label>
+                  <span className="text-[10px] text-sky-400">Allowed for context (not penalized)</span>
+                </div>
                 <input
                   type="text"
-                  value={niche.blocked_topics.join(", ")}
+                  value={(niche.adjacent_topics || []).join(", ")}
+                  onChange={(e) =>
+                    setNiche({
+                      ...niche,
+                      adjacent_topics: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                    })
+                  }
+                  placeholder="database indexing, devops pipelines, API design"
+                  className="w-full px-3 py-2 text-sm rounded-lg bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-medium text-slate-300">
+                    {t("settings.nicheTab.blockedTopics", "Blocked Topics (Instant Block)")}
+                  </label>
+                  <span className="text-[10px] text-rose-400">Hard reject unless educational critique</span>
+                </div>
+                <input
+                  type="text"
+                  value={(niche.blocked_topics || []).join(", ")}
                   onChange={(e) =>
                     setNiche({
                       ...niche,
                       blocked_topics: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
                     })
                   }
-                  placeholder="crypto trading, get rich quick, general consumer gadgets"
+                  placeholder="crypto trading, get rich quick, passive income schemes, celebrity gossip"
                   className="w-full px-3 py-2 text-sm rounded-lg bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  Negative Keywords (Auto-reject signals)
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  {t("settings.nicheTab.negativeKeywords", "Negative Keywords (Hype / Low-value Signals)")}
                 </label>
                 <input
                   type="text"
-                  value={niche.negative_keywords.join(", ")}
+                  value={(niche.negative_keywords || []).join(", ")}
                   onChange={(e) =>
                     setNiche({
                       ...niche,
                       negative_keywords: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
                     })
                   }
-                  placeholder="secret trick, replaced all coders, 100x money"
+                  placeholder="secret trick, replaced all coders, 100x money, guaranteed success"
+                  className="w-full px-3 py-2 text-sm rounded-lg bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  {t("settings.nicheTab.mustHaveSignals", "Must-Have Signals (Bonus Alignment Indicators)")}
+                </label>
+                <input
+                  type="text"
+                  value={(niche.must_have_signals || []).join(", ")}
+                  onChange={(e) =>
+                    setNiche({
+                      ...niche,
+                      must_have_signals: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                    })
+                  }
+                  placeholder="benchmark, reproducible, architecture, production-grade"
+                  className="w-full px-3 py-2 text-sm rounded-lg bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  {t("settings.nicheTab.evergreenTopics", "Evergreen Topics")}
+                </label>
+                <input
+                  type="text"
+                  value={(niche.evergreen_topics || []).join(", ")}
+                  onChange={(e) =>
+                    setNiche({
+                      ...niche,
+                      evergreen_topics: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                    })
+                  }
+                  placeholder="python debugging, unit testing best practices, sqlite wal mode"
                   className="w-full px-3 py-2 text-sm rounded-lg bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
             </div>
+          </div>
+
+          {/* Section 3: Topic Exceptions (Contextual Critiques / Debunks) */}
+          <div className="space-y-4 pt-4 border-t border-slate-800">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-200 uppercase tracking-wider">
+                  3. {t("settings.nicheTab.topicExceptions", "Topic Exceptions (Contextual Critiques & Myth-Busting)")}
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Allow specific blocked terms when explicitly framed as educational debunking, myth-busting, or critical review.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleAddException}
+                className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                {t("settings.nicheTab.addException", "Add Exception")}
+              </button>
+            </div>
+
+            {(niche.topic_exceptions || []).length === 0 ? (
+              <p className="text-xs text-slate-400 italic">No custom topic exceptions configured.</p>
+            ) : (
+              <div className="space-y-2">
+                {(niche.topic_exceptions || []).map((exc, idx) => (
+                  <div key={idx} className="flex items-center gap-3 p-2.5 rounded-lg bg-slate-950 border border-slate-800">
+                    <input
+                      type="text"
+                      value={exc.topic}
+                      onChange={(e) => handleUpdateException(idx, "topic", e.target.value)}
+                      placeholder="Topic (e.g. passive income)"
+                      className="flex-1 px-2.5 py-1 text-xs rounded bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-indigo-500"
+                    />
+                    <input
+                      type="text"
+                      value={exc.allowed_context}
+                      onChange={(e) => handleUpdateException(idx, "allowed_context", e.target.value)}
+                      placeholder="Allowed Context (e.g. educational_critique)"
+                      className="flex-1 px-2.5 py-1 text-xs rounded bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-indigo-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteException(idx)}
+                      className="p-1 text-slate-400 hover:text-red-400 transition-colors"
+                      title="Remove Exception"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Section 4: Content Pillars (Enriched v1.02) */}
+          <div className="space-y-4 pt-4 border-t border-slate-800">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-200 uppercase tracking-wider">
+                  4. {t("settings.nicheTab.contentPillars", "Content Pillars (Enriched Taxonomy)")}
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Core editorial categories with dedicated matching keywords, synonyms, and objective descriptions.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleAddPillar}
+                className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                {t("settings.nicheTab.addPillar", "Add Pillar")}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {(niche.content_pillars || []).map((pillar, idx) => (
+                <div key={pillar.id || idx} className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-mono text-indigo-400 bg-indigo-950/40 px-2 py-0.5 rounded border border-indigo-800/40">
+                      #{pillar.id}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleDeletePillar(idx)}
+                      className="text-slate-400 hover:text-red-400 p-1 transition-colors"
+                      title="Delete Pillar"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                      {t("settings.nicheTab.pillarName", "Pillar Name")}
+                    </label>
+                    <input
+                      type="text"
+                      value={pillar.name}
+                      onChange={(e) => handleUpdatePillar(idx, "name", e.target.value)}
+                      placeholder="e.g. AI Coding Agents"
+                      className="w-full px-2.5 py-1.5 text-xs rounded bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                      {t("settings.nicheTab.pillarDesc", "Description")}
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={pillar.description}
+                      onChange={(e) => handleUpdatePillar(idx, "description", e.target.value)}
+                      placeholder="Hands-on evaluations, benchmarks, and architectural patterns for autonomous agents."
+                      className="w-full px-2.5 py-1.5 text-xs rounded bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                        {t("settings.nicheTab.pillarKeywords", "Keywords")}
+                      </label>
+                      <input
+                        type="text"
+                        value={(pillar.keywords || []).join(", ")}
+                        onChange={(e) =>
+                          handleUpdatePillar(
+                            idx,
+                            "keywords",
+                            e.target.value.split(",").map((s) => s.trim()).filter(Boolean)
+                          )
+                        }
+                        placeholder="agents, autonomous, benchmarks"
+                        className="w-full px-2 py-1 text-xs rounded bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                        {t("settings.nicheTab.pillarSynonyms", "Synonyms")}
+                      </label>
+                      <input
+                        type="text"
+                        value={(pillar.synonyms || []).join(", ")}
+                        onChange={(e) =>
+                          handleUpdatePillar(
+                            idx,
+                            "synonyms",
+                            e.target.value.split(",").map((s) => s.trim()).filter(Boolean)
+                          )
+                        }
+                        placeholder="agentic AI, coding assistants"
+                        className="w-full px-2 py-1 text-xs rounded bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Section 5: Live Dry Run & Topic Alignment Tester */}
+          <div className="space-y-4 pt-4 border-t border-slate-800">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                <Play className="w-4 h-4 text-emerald-400" />
+                5. {t("settings.nicheTab.dryRunTitle", "Topic Test & Dry Run Preview")}
+              </h3>
+              <p className="text-xs text-slate-400">
+                {t("settings.nicheTab.dryRunSubtitle", "Test candidate topics against current or proposed rules before saving.")}
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <input
+                type="text"
+                value={testTopicInput}
+                onChange={(e) => setTestTopicInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleRunTestTopic();
+                  }
+                }}
+                placeholder={t("settings.nicheTab.testInputPlaceholder", "Enter candidate topic or title to test...")}
+                className="flex-1 px-3 py-2 text-sm rounded-lg bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-indigo-500"
+              />
+              <button
+                type="button"
+                onClick={() => handleRunTestTopic()}
+                disabled={testingTopic || !testTopicInput.trim()}
+                className="flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white shadow-md shadow-emerald-600/20 transition-colors"
+              >
+                <Play className="w-3.5 h-3.5" />
+                {testingTopic ? t("common.running", "Evaluating...") : t("settings.nicheTab.runDryRun", "Test Topic")}
+              </button>
+            </div>
+
+            {/* Quick Test Chips */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-slate-400 mr-1">Quick Test:</span>
+              {[
+                "Benchmarking AI coding agents on large legacy repositories",
+                "Why database indexing matters when building AI agent memory",
+                "Why AI trading bots cannot guarantee passive income",
+                "Guaranteed 100x crypto trading bot profit scheme",
+                "How to make artisan sourdough bread at home",
+              ].map((sample, sIdx) => (
+                <button
+                  key={sIdx}
+                  type="button"
+                  onClick={() => {
+                    setTestTopicInput(sample);
+                    handleRunTestTopic(sample);
+                  }}
+                  className="px-2 py-1 text-[11px] rounded bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700/60 transition-colors"
+                >
+                  {sample.length > 40 ? sample.slice(0, 38) + "..." : sample}
+                </button>
+              ))}
+            </div>
+
+            {/* Dry Run Result Display */}
+            {testDryRunResult && testDryRunResult.results.length > 0 && (
+              <div className="mt-4 p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                {testDryRunResult.results.map((res, rIdx) => {
+                  const v = res.verdict;
+                  const classificationColors: Record<string, string> = {
+                    core_niche: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
+                    adjacent: "bg-sky-500/20 text-sky-400 border-sky-500/30",
+                    ambiguous: "bg-amber-500/20 text-amber-400 border-amber-500/30",
+                    blocked: "bg-rose-500/20 text-rose-400 border-rose-500/30",
+                    off_niche: "bg-slate-500/20 text-slate-400 border-slate-500/30",
+                  };
+                  const badgeColor = classificationColors[v.classification || ""] || (v.passed ? classificationColors.core_niche : classificationColors.blocked);
+
+                  return (
+                    <div key={rIdx} className="space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border ${badgeColor}`}>
+                            {v.classification?.toUpperCase() || (v.passed ? "PASSED" : "REJECTED")}
+                          </span>
+                          <span className="text-xs font-bold text-white">
+                            Score: {v.score}/100
+                          </span>
+                          {v.requires_review && (
+                            <span className="px-2 py-0.5 rounded text-[11px] bg-amber-950/40 text-amber-300 border border-amber-700/40">
+                              Review Required
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[11px] text-slate-400 font-mono">
+                          Policy v{v.policy_version || niche.policy_version || 1}
+                        </span>
+                      </div>
+
+                      <div className="text-xs text-slate-300">
+                        <span className="font-semibold text-white">Reason:</span> {v.reason}
+                      </div>
+
+                      {v.requires_review && v.review_reasons && v.review_reasons.length > 0 && (
+                        <div className="p-2 rounded bg-amber-950/20 border border-amber-900/30 text-xs text-amber-300">
+                          <span className="font-semibold">Review reasons:</span> {v.review_reasons.join("; ")}
+                        </div>
+                      )}
+
+                      {/* 5-Dimension Audience Value Breakdown */}
+                      {v.audience_value_breakdown && (
+                        <div className="pt-2">
+                          <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-2">
+                            Audience Value Breakdown:
+                          </span>
+                          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                            {Object.entries(v.audience_value_breakdown).map(([dim, score]) => (
+                              <div key={dim} className="p-2 rounded bg-slate-900/80 border border-slate-800 text-center">
+                                <span className="block text-[10px] text-slate-400 capitalize">
+                                  {dim.replace("_", " ")}
+                                </span>
+                                <span className="text-xs font-bold text-indigo-300">
+                                  {score}/100
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Platform Warning Metadata if any */}
+                      {v.platform_warning_metadata?.notes && v.platform_warning_metadata.notes.length > 0 && (
+                        <div className="p-2 rounded bg-slate-900 text-xs text-slate-400 border border-slate-800">
+                          <span className="font-semibold text-slate-300">Platform Warning Note:</span>{" "}
+                          {v.platform_warning_metadata.notes.join("; ")}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Section 6: Policy Revision Audit History */}
+          <div className="space-y-4 pt-4 border-t border-slate-800">
+            <h3 className="text-sm font-semibold text-slate-200 uppercase tracking-wider flex items-center gap-2">
+              <History className="w-4 h-4 text-slate-400" />
+              6. {t("settings.nicheTab.policyHistoryTitle", "Policy Revision Audit History")}
+            </h3>
+            <p className="text-xs text-slate-400">
+              Immutable records of material changes to topic boundaries, pillars, and negative keywords.
+            </p>
+
+            {policyAudits.length === 0 ? (
+              <p className="text-xs text-slate-400 italic">No revision audit logs recorded yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {policyAudits.map((audit) => (
+                  <div key={audit.id} className="p-3 rounded-lg bg-slate-950 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-indigo-400">
+                          v{audit.policy_version}
+                        </span>
+                        {audit.material_change ? (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-indigo-950 text-indigo-300 border border-indigo-800">
+                            Material Update
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-slate-900 text-slate-400 border border-slate-800">
+                            Minor Update
+                          </span>
+                        )}
+                        <span className="text-slate-300 font-medium">{audit.change_summary}</span>
+                      </div>
+                      {audit.diff_fields && audit.diff_fields.length > 0 && (
+                        <div className="text-[11px] text-slate-400">
+                          Fields changed: {audit.diff_fields.join(", ")}
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-right text-[11px] text-slate-400 font-mono shrink-0">
+                      <div>{new Date(audit.created_at).toLocaleString()}</div>
+                      <div title={audit.policy_fingerprint}>SHA: {audit.policy_fingerprint?.slice(0, 10)}...</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

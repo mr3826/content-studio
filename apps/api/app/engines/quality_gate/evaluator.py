@@ -1,4 +1,6 @@
 from typing import Any, Dict, List, Optional
+from app.engines.niche_guard.contracts import NicheGuardInput
+from app.engines.niche_guard.engine import NicheGuardEngine
 from app.engines.quality_gate.contracts import (
     CorrectionRoute,
     DimensionStatus,
@@ -45,7 +47,7 @@ class QualityGateEvaluator:
         recommendations.extend(vv_routes)
 
         # 5. Niche Fit
-        nf_dim, nf_routes = self._eval_niche(niche, item, script)
+        nf_dim, nf_routes = self._eval_niche(niche, item, script, family=family, packet=packet)
         dimensions.append(nf_dim)
         recommendations.extend(nf_routes)
 
@@ -250,24 +252,243 @@ class QualityGateEvaluator:
             details=details,
         ), routes
 
-    def _eval_niche(self, niche: Optional[Any], item: Any, script: Optional[Any]) -> tuple[QualityDimension, List[CorrectionRoute]]:
-        score = 92.0
-        status = DimensionStatus.PASSED
-        details = []
-        routes = []
+    def _eval_niche(
+        self,
+        niche: Optional[Any],
+        item: Any,
+        script: Optional[Any],
+        family: Optional[Any] = None,
+        packet: Optional[Any] = None,
+    ) -> tuple[QualityDimension, List[CorrectionRoute]]:
+        if not niche:
+            return QualityDimension(
+                id="niche_fit",
+                name="Single Niche Alignment",
+                score=0.0,
+                status=DimensionStatus.BLOCKED,
+                summary="Active niche profile is unconfigured. Quality Gate requires a valid active niche.",
+                metrics={"niche_name": None, "verdict_id": None, "classification": "missing_profile", "requires_review": True},
+                details=["NicheProfile 'primary' is missing in studio database."],
+            ), [
+                CorrectionRoute(
+                    action_type="return_to_script",
+                    title="Configure Studio Niche",
+                    description="Configure your active single-niche profile in Studio Settings.",
+                    target_route="/settings",
+                    severity="high",
+                )
+            ]
 
-        niche_name = getattr(niche, "name", "Default Niche") if niche else "Local Studio"
-        details.append(f"Content strictly aligns with primary problems of niche: '{niche_name}'.")
+        # Extract attributes from niche (handles both Pydantic/SQLAlchemy model or dict)
+        if isinstance(niche, dict):
+            name_val = niche.get("name", "")
+            allowed = list(niche.get("allowed_topics", []) or [])
+            adjacent = list(niche.get("adjacent_topics", []) or [])
+            blocked = list(niche.get("blocked_topics", []) or [])
+            pillars = list(niche.get("content_pillars", []) or [])
+            problems = list(niche.get("primary_problems", []) or [])
+            neg_keywords = list(niche.get("negative_keywords", []) or [])
+            must_haves = list(niche.get("must_have_signals", []) or [])
+            topic_exceptions = list(niche.get("topic_exceptions", []) or [])
+            evergreen = list(niche.get("evergreen_topics", []) or [])
+            commercial = list(niche.get("commercial_intent_topics", []) or [])
+            version_val = niche.get("policy_version", 1)
+            fingerprint_val = niche.get("policy_fingerprint")
+            one_sentence = niche.get("one_sentence_definition", "")
+            audience_val = niche.get("audience", "")
+            target_skills = list(niche.get("target_skill_levels", []) or [])
+            aud_goals = list(niche.get("audience_goals", []) or [])
+        else:
+            name_val = getattr(niche, "name", "")
+            allowed = list(getattr(niche, "allowed_topics", []) or [])
+            adjacent = list(getattr(niche, "adjacent_topics", []) or [])
+            blocked = list(getattr(niche, "blocked_topics", []) or [])
+            pillars = list(getattr(niche, "content_pillars", []) or [])
+            problems = list(getattr(niche, "primary_problems", []) or [])
+            neg_keywords = list(getattr(niche, "negative_keywords", []) or [])
+            must_haves = list(getattr(niche, "must_have_signals", []) or [])
+            topic_exceptions = list(getattr(niche, "topic_exceptions", []) or [])
+            evergreen = list(getattr(niche, "evergreen_topics", []) or [])
+            commercial = list(getattr(niche, "commercial_intent_topics", []) or [])
+            version_val = getattr(niche, "policy_version", 1)
+            fingerprint_val = getattr(niche, "policy_fingerprint", None)
+            one_sentence = getattr(niche, "one_sentence_definition", "")
+            audience_val = getattr(niche, "audience", "") or getattr(niche, "target_audience", "")
+            target_skills = list(getattr(niche, "target_skill_levels", []) or [])
+            aud_goals = list(getattr(niche, "audience_goals", []) or [])
+
+        # Include creator-approved evergreen and commercial topics in allowed topics
+        for eg in evergreen:
+            if eg not in allowed:
+                allowed.append(eg)
+        for cm in commercial:
+            if cm not in allowed:
+                allowed.append(cm)
+
+        # Empty allowed topics and pillars is an unconfigured policy: strictly non-passing
+        if not allowed and not pillars:
+            return QualityDimension(
+                id="niche_fit",
+                name="Single Niche Alignment",
+                score=0.0,
+                status=DimensionStatus.BLOCKED,
+                summary="Active niche profile has no defined allowed topics or content pillars.",
+                metrics={
+                    "niche_name": name_val,
+                    "verdict_id": None,
+                    "classification": "unconfigured_policy",
+                    "requires_review": True,
+                },
+                details=["The active niche profile has empty allowed topics and empty content pillars. Configure pillars in Settings."],
+            ), [
+                CorrectionRoute(
+                    action_type="return_to_script",
+                    title="Define Content Pillars",
+                    description="Configure content pillars and allowed topics in Studio Settings to evaluate niche alignment.",
+                    target_route="/settings",
+                    severity="high",
+                )
+            ]
+
+        niche_dict = {
+            "name": name_val,
+            "one_sentence_definition": one_sentence,
+            "audience": audience_val,
+            "target_skill_levels": target_skills,
+            "audience_goals": aud_goals,
+            "allowed_topics": allowed,
+            "adjacent_topics": adjacent,
+            "blocked_topics": blocked,
+            "topic_exceptions": topic_exceptions,
+            "must_have_signals": must_haves,
+            "negative_keywords": neg_keywords,
+            "content_pillars": pillars,
+            "primary_problems": problems,
+            "policy_version": version_val,
+            "policy_fingerprint": fingerprint_val,
+        }
+
+        # Build candidate evaluation input from item, family, research packet, and script
+        title = getattr(item, "title", None) or getattr(item, "working_title", "") or ""
+        topic = getattr(item, "topic", "") or getattr(item, "original_value_connection", "") or ""
+        angle = getattr(item, "angle", "") or ""
+        viewer_value = getattr(item, "viewer_value", "") or ""
+
+        context_parts = [topic, angle, viewer_value]
+        if family:
+            if getattr(family, "title", None):
+                context_parts.append(str(family.title))
+            if getattr(family, "content_pillar", None):
+                context_parts.append(str(family.content_pillar))
+            if getattr(family, "summary", None):
+                context_parts.append(str(family.summary))
+        if packet:
+            if getattr(packet, "topic", None):
+                context_parts.append(str(packet.topic))
+            if getattr(packet, "summary", None):
+                context_parts.append(str(packet.summary))
+
+        script_parts = []
+        if script:
+            if getattr(script, "hook", None):
+                script_parts.append(script.hook)
+            if getattr(script, "call_to_action", None):
+                script_parts.append(script.call_to_action)
+            sections = getattr(script, "sections", []) or []
+            for s in sections:
+                narration = getattr(s, "narration", "")
+                if narration:
+                    script_parts.append(narration)
+
+        script_text = " ".join(script_parts)
+        combined_text = f"{' '.join(context_parts)} {script_text}".strip()
+        tags = [t for t in [topic, getattr(item, "platform_target", ""), getattr(item, "format", "")] if t]
+        if family and getattr(family, "content_pillar", None):
+            tags.append(str(family.content_pillar))
+
+        guard_input = NicheGuardInput(
+            id=getattr(item, "id", None),
+            title=title or "Untitled Item",
+            text=combined_text,
+            tags=tags,
+        )
+
+        guard_engine = NicheGuardEngine()
+        verdict = guard_engine.evaluate_item(guard_input, niche_dict)
+
+        routes: List[CorrectionRoute] = []
+        details = [f.detail for f in verdict.factors]
+
+        if verdict.is_blocked:
+            status = DimensionStatus.BLOCKED
+            score = 0.0
+            summary = f"Blocked niche topic detected: {', '.join(verdict.blocked_topics_detected)}."
+            routes.append(CorrectionRoute(
+                action_type="return_to_script",
+                title="Remove Blocked Topic",
+                description=f"Content triggered hard-blocked topic: {', '.join(verdict.blocked_topics_detected)}",
+                target_route=f"/script-studio/{getattr(item, 'id', '')}",
+                severity="high",
+            ))
+        elif verdict.classification == "off_niche":
+            status = DimensionStatus.BLOCKED
+            score = verdict.score
+            summary = f"Off-niche content rejected ({verdict.score}/100): {verdict.reason}"
+            routes.append(CorrectionRoute(
+                action_type="return_to_script",
+                title="Adjust Topic to Match Niche",
+                description="Align content with approved content pillars and allowed topics.",
+                target_route=f"/script-studio/{getattr(item, 'id', '')}",
+                severity="high",
+            ))
+        elif verdict.requires_review or verdict.classification == "ambiguous":
+            status = DimensionStatus.WARNING
+            score = verdict.score
+            summary = f"Niche fit requires creator review ({verdict.score}/100): {'; '.join(verdict.review_reasons) if verdict.review_reasons else verdict.reason}."
+            routes.append(CorrectionRoute(
+                action_type="return_to_script",
+                title="Editorial Review Required",
+                description=f"Review niche alignment factors: {'; '.join(verdict.review_reasons) if verdict.review_reasons else verdict.reason}",
+                target_route=f"/script-studio/{getattr(item, 'id', '')}",
+                severity="medium",
+            ))
+        elif verdict.passed:
+            status = DimensionStatus.PASSED
+            score = verdict.score
+            summary = f"Single-niche alignment verified ({verdict.score}/100) for '{name_val}'."
+        else:
+            status = DimensionStatus.WARNING
+            score = verdict.score
+            summary = f"Niche alignment warning ({verdict.score}/100): {verdict.reason}"
+            routes.append(CorrectionRoute(
+                action_type="return_to_script",
+                title="Review Niche Alignment",
+                description=f"Verify topic fit against niche goals: {verdict.reason}",
+                target_route=f"/script-studio/{getattr(item, 'id', '')}",
+                severity="medium",
+            ))
+
+        metrics = {
+            "niche_name": name_val,
+            "verdict_id": verdict.id,
+            "classification": verdict.classification,
+            "requires_review": verdict.requires_review,
+            "pillar_matches": verdict.pillar_matches,
+            "policy_version": verdict.policy_version,
+            "policy_fingerprint": verdict.policy_fingerprint or fingerprint_val,
+            "audience_value": verdict.audience_value_breakdown,
+        }
 
         return QualityDimension(
             id="niche_fit",
             name="Single Niche Alignment",
             score=score,
             status=status,
-            summary=f"100% compliant with single-niche policy ({niche_name}).",
-            metrics={"niche_name": niche_name},
+            summary=summary,
+            metrics=metrics,
             details=details,
         ), routes
+
 
     def _eval_repetition(self, item: Any, script: Optional[Any], family: Optional[Any]) -> tuple[QualityDimension, List[CorrectionRoute]]:
         score = 88.0

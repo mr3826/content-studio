@@ -22,6 +22,15 @@ export interface ContentPillar {
   id: string;
   name: string;
   description: string;
+  keywords?: string[];
+  synonyms?: string[];
+  audience_problem_ids?: string[];
+  examples?: string[];
+}
+
+export interface TopicException {
+  topic: string;
+  allowed_context: string;
 }
 
 export interface NicheProfile {
@@ -29,17 +38,22 @@ export interface NicheProfile {
   name: string;
   one_sentence_definition: string;
   audience: string;
+  target_skill_levels?: string[];
+  audience_goals?: string[];
   audience_regions: string[];
   primary_problems: string[];
   allowed_topics: string[];
   adjacent_topics: string[];
   blocked_topics: string[];
+  topic_exceptions?: TopicException[];
   must_have_signals: string[];
   negative_keywords: string[];
   preferred_source_types: string[];
   content_pillars: ContentPillar[];
   commercial_intent_topics: string[];
   evergreen_topics: string[];
+  policy_version?: number;
+  policy_fingerprint?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -160,6 +174,21 @@ export async function updateNiche(data: NicheProfile): Promise<NicheProfile> {
 export async function seedNiche(): Promise<NicheProfile> {
   return await request<NicheProfile>("/api/v1/niche/seed-default", {
     method: "POST",
+  });
+}
+
+export async function getNichePolicyAudits(limit: number = 20): Promise<NichePolicyAudit[]> {
+  try {
+    return await request<NichePolicyAudit[]>(`/api/v1/niche/policy-audits?limit=${limit}`, { cache: "no-store" });
+  } catch (error) {
+    return [];
+  }
+}
+
+export async function dryRunNiche(payload: NicheDryRunRequest): Promise<NicheDryRunResponse> {
+  return await request<NicheDryRunResponse>("/api/v1/niche/dry-run", {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 
@@ -422,16 +451,66 @@ export interface NicheGuardFactor {
   matched_items: string[];
 }
 
+export interface NichePolicyAudit {
+  id: string;
+  profile_id: string;
+  policy_version: number;
+  policy_fingerprint: string;
+  change_summary: string;
+  material_change: boolean;
+  diff_fields: string[];
+  snapshot: Record<string, any>;
+  created_at: string;
+}
+
+export interface NicheDryRunRequest {
+  candidate_topics: string[];
+  proposed_profile?: Partial<NicheProfile>;
+}
+
+export interface NicheDryRunItemResult {
+  candidate: string;
+  verdict: NicheGuardVerdict;
+}
+
+export interface NicheDryRunResponse {
+  policy_version: number;
+  policy_fingerprint: string;
+  results: NicheDryRunItemResult[];
+  pass_count: number;
+  blocked_count: number;
+  review_count: number;
+  adjacent_count: number;
+}
+
 export interface NicheGuardVerdict {
   id: string;
   input_id?: string;
   passed: boolean;
   score: number;
+  classification?: "core_niche" | "adjacent" | "off_niche" | "blocked" | "ambiguous";
+  requires_review?: boolean;
+  review_reasons?: string[];
   reason: string;
   primary_pillar?: string | null;
   is_adjacent?: boolean;
   is_blocked?: boolean;
+  policy_version?: number;
+  policy_fingerprint?: string | null;
   audience_relevance?: number;
+  audience_value_breakdown?: {
+    topic_relevance: number;
+    audience_fit: number;
+    problem_relevance: number;
+    practical_value: number;
+    evidence_potential: number;
+  };
+  platform_warning_metadata?: {
+    disclaimer_suggested?: boolean;
+    educational_critique?: boolean;
+    promotional_risk?: boolean;
+    notes?: string[];
+  };
   pillar_matches: string[];
   matched_allowed_topics: string[];
   matched_adjacent_topics: string[];
@@ -485,8 +564,9 @@ export interface BrandQAVerdict {
   evaluated_at: string;
 }
 
-export async function evaluateNicheGuard(payload: NicheGuardInput): Promise<NicheGuardVerdict> {
-  return await request<NicheGuardVerdict>("/api/v1/niche-guard/evaluate", {
+export async function evaluateNicheGuard(payload: NicheGuardInput, allowFallback: boolean = false): Promise<NicheGuardVerdict> {
+  const url = allowFallback ? "/api/v1/niche-guard/evaluate?allow_fallback=true" : "/api/v1/niche-guard/evaluate";
+  return await request<NicheGuardVerdict>(url, {
     method: "POST",
     body: JSON.stringify(payload),
   });
